@@ -1,0 +1,27 @@
+# render.yaml — Deploy to Render.com
+# docs: https://render.com/docs/blueprint-spec
+
+services:
+  # ── Backend API (FastAPI) ─────────────────────────────────
+  - type: web
+    name: iv-sig-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter          # free tier → upgrade to standard for production
+    autoDeploy: true
+    envVars:
+      - key: SUPABASE_URL
+        sync: false        # set manually in Render dashboard
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+    healthCheckPath: /health
+
+  # ── Frontend (React PWA via nginx) ───────────────────────
+  - type: web
+    name: iv-sig-app
+    runtime: docker
+    dockerfilePath: ./Dockerfile.frontend
+    plan: starter
+    autoDeploy: true
+    buildArgs:
+      REACT_APP_API_URL: https://placeholder   # update after first deploy
