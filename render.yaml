@@ -3,11 +3,13 @@
 
 services:
   # ── Backend API (FastAPI) ─────────────────────────────────
+  # Free web service: sleeps after 15 min idle, ~1 min cold start.
+  # Optionally keep warm with an uptime pinger hitting /health.
   - type: web
     name: iv-sig-api
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter          # free tier → upgrade to standard for production
+    plan: free             # $0 — upgrade to starter/standard for always-on production
     autoDeploy: true
     envVars:
       - key: SUPABASE_URL
@@ -18,16 +20,24 @@ services:
         sync: false        # set to your frontend URL, e.g. https://iv-sig-app.onrender.com
     healthCheckPath: /health
 
-  # ── Frontend (React PWA via nginx) ───────────────────────
+  # ── Frontend (React PWA) ─────────────────────────────────
+  # Static Site: $0, served from CDN, NEVER spins down, no instance-hour limit.
+  # Render runs buildCommand, then serves the files in staticPublishPath.
   - type: web
     name: iv-sig-app
-    runtime: docker
-    dockerfilePath: ./Dockerfile.frontend
-    plan: starter
+    runtime: static
+    # Install deps and build the React app (legacy-peer-deps matches the old Dockerfile).
+    buildCommand: cd frontend && npm install --legacy-peer-deps && npm run build
+    # Create React App outputs to frontend/build (relative to repo root).
+    staticPublishPath: ./frontend/build
     autoDeploy: true
     envVars:
-      # Render passes envVars into the Docker build as --build-arg.
-      # Dockerfile.frontend has `ARG REACT_APP_API_URL` to receive it,
-      # so CRA bakes this URL into the static bundle at build time.
+      # Available at build time; Create React App bakes REACT_APP_* into the bundle.
       - key: REACT_APP_API_URL
         value: https://placeholder   # update to your API URL after first deploy
+    # SPA rewrite: send every non-file path to index.html so client-side
+    # routing and page refreshes work instead of returning 404.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
