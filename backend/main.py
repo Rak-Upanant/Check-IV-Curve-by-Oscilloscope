@@ -56,7 +56,9 @@ async def _unhandled(request: Request, exc: Exception):
     )
 
 # ─── HEALTH ──────────────────────────────────────────────────
-@app.get("/health")
+# Accept GET and HEAD: uptime monitors (e.g. UptimeRobot free tier) send
+# HEAD requests, and a GET-only route would reject those with 405.
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 
