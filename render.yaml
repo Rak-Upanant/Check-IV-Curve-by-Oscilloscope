@@ -34,7 +34,7 @@ services:
     envVars:
       # Available at build time; Create React App bakes REACT_APP_* into the bundle.
       - key: REACT_APP_API_URL
-        value: https://placeholder   # update to your API URL after first deploy
+        value: https://iv-sig-api.onrender.com   # backend API (confirmed live)
     # SPA rewrite: send every non-file path to index.html so client-side
     # routing and page refreshes work instead of returning 404.
     routes:
