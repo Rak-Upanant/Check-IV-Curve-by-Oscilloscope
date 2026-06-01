@@ -25,5 +25,9 @@ services:
     dockerfilePath: ./Dockerfile.frontend
     plan: starter
     autoDeploy: true
-    buildArgs:
-      REACT_APP_API_URL: https://placeholder   # update after first deploy
+    envVars:
+      # Render passes envVars into the Docker build as --build-arg.
+      # Dockerfile.frontend has `ARG REACT_APP_API_URL` to receive it,
+      # so CRA bakes this URL into the static bundle at build time.
+      - key: REACT_APP_API_URL
+        value: https://placeholder   # update to your API URL after first deploy
