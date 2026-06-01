@@ -2,7 +2,8 @@
 import React, { useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { getSession, getTestPoints, analyzeImage, completeSession } from "../lib/api";
+import { useLocation } from "react-router-dom";
+import { getSession, getTestPoints, analyzeImage, collectImage, completeSession } from "../lib/api";
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 import toast from "react-hot-toast";
 
@@ -74,11 +75,20 @@ function CurveChart({ masterV, masterI, testV, testI }) {
 export default function TestFlow() {
   const { sessionId } = useParams();
   const nav = useNavigate();
+  const location = useLocation();
+  const collectOnly = location.state?.mode === "collect";  // passed from SessionSetup
+
   const [currentIdx, setCurrentIdx] = useState(0);
   const [results, setResults] = useState({});       // point_id -> result
   const [preview, setPreview] = useState(null);
   const [file, setFile] = useState(null);
   const fileRef = useRef();
+
+  // Collect-only batch upload state
+  const [batchActive,   setBatchActive]   = useState(false);
+  const [batchTotal,    setBatchTotal]    = useState(0);
+  const [batchDone,     setBatchDone]     = useState(0);
+  const [batchNames,    setBatchNames]    = useState([]);   // filenames for display
 
   const { data: session } = useQuery({ queryKey: ["session", sessionId], queryFn: () => getSession(sessionId) });
   const { data: points }  = useQuery({
@@ -92,12 +102,20 @@ export default function TestFlow() {
   const allDone = points && currentIdx >= points.length;
 
   const analyzeMutation = useMutation({
-    mutationFn: () => analyzeImage(sessionId, currentPoint.point_id, file),
+    mutationFn: () => collectOnly
+      ? collectImage(sessionId, currentPoint.point_id, file)
+      : analyzeImage(sessionId, currentPoint.point_id, file),
     onSuccess: (res) => {
-      setResults(prev => ({ ...prev, [currentPoint.point_id]: res }));
-      setFile(null); setPreview(null);
+      if (collectOnly) {
+        // Collect mode: auto-advance without showing result card
+        setFile(null); setPreview(null);
+        setCurrentIdx(i => i + 1);
+      } else {
+        setResults(prev => ({ ...prev, [currentPoint.point_id]: res }));
+        setFile(null); setPreview(null);
+      }
     },
-    onError: () => toast.error("Analysis failed — try again"),
+    onError: () => toast.error(collectOnly ? "Upload failed — try again" : "Analysis failed — try again"),
   });
 
   const finishMutation = useMutation({
@@ -105,12 +123,42 @@ export default function TestFlow() {
     onSuccess: () => nav(`/summary/${sessionId}`),
   });
 
-  const onFileChange = useCallback((e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
-  }, []);
+  const onFileChange = useCallback(async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+
+    if (collectOnly && files.length > 1) {
+      // ── Batch collect: assign files to consecutive test points in order ──
+      const startIdx = currentIdx;
+      const toUpload = files.slice(0, points.length - startIdx);
+      setBatchNames(toUpload.map(f => f.name));
+      setBatchTotal(toUpload.length);
+      setBatchDone(0);
+      setBatchActive(true);
+      let uploaded = 0;
+      for (let i = 0; i < toUpload.length; i++) {
+        const point = points[startIdx + i];
+        try {
+          await collectImage(sessionId, point.point_id, toUpload[i]);
+          uploaded++;
+          setBatchDone(uploaded);
+        } catch {
+          toast.error(`Upload failed: ${point.point_name}`);
+        }
+      }
+      setCurrentIdx(startIdx + uploaded);
+      setBatchActive(false);
+      setBatchTotal(0);
+      setBatchDone(0);
+      setBatchNames([]);
+    } else {
+      // ── Single file: preview → confirm button ──
+      const f = files[0];
+      setFile(f);
+      setPreview(URL.createObjectURL(f));
+    }
+  }, [collectOnly, currentIdx, points, sessionId]);
 
   const handleNext = () => {
     setCurrentIdx(i => i + 1);
@@ -127,21 +175,30 @@ export default function TestFlow() {
     <div className="page">
       <div className="topbar">
         <span className="topbar-logo">▸ IV·SIG</span>
-        <span className="topbar-title">All Points Done</span>
+        <span className="topbar-title">{collectOnly ? "Collection Complete" : "All Points Done"}</span>
       </div>
       <div className="section" style={{ paddingTop: 40, textAlign: "center" }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>✓</div>
         <div style={{ fontFamily: "var(--mono)", fontSize: 16, color: "var(--ok)", marginBottom: 8 }}>
-          All {points.length} points tested
+          {collectOnly
+            ? `${points.length} images collected`
+            : `All ${points.length} points tested`}
         </div>
-        <div style={{ fontSize: 13, color: "var(--text2)", marginBottom: 32 }}>
-          {Object.values(results).filter(r => r.status === "ok").length} OK ·{" "}
-          {Object.values(results).filter(r => r.status === "warning").length} Warning ·{" "}
-          {Object.values(results).filter(r => r.status === "fault").length} Fault
-        </div>
+        {!collectOnly && (
+          <div style={{ fontSize: 13, color: "var(--text2)", marginBottom: 32 }}>
+            {Object.values(results).filter(r => r.status === "ok").length} OK ·{" "}
+            {Object.values(results).filter(r => r.status === "warning").length} Warning ·{" "}
+            {Object.values(results).filter(r => r.status === "fault").length} Fault
+          </div>
+        )}
+        {collectOnly && (
+          <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 32, fontFamily: "var(--mono)" }}>
+            Images stored — upload masters when ready to enable analysis
+          </div>
+        )}
         <button className="btn btn-primary" onClick={() => finishMutation.mutate()}
           disabled={finishMutation.isPending}>
-          {finishMutation.isPending ? "Finishing..." : "Generate Report →"}
+          {finishMutation.isPending ? "Finishing..." : collectOnly ? "Done →" : "Generate Report →"}
         </button>
       </div>
     </div>
@@ -190,8 +247,8 @@ export default function TestFlow() {
           </div>
         </div>
 
-        {/* Master reference */}
-        {currentPoint?.master_signatures?.[0] && (
+        {/* Master reference — hidden in collect mode */}
+        {!collectOnly && currentPoint?.master_signatures?.[0] && (
           <div style={{ marginBottom: 16 }}>
             <div className="label">Master Reference</div>
             <img
@@ -202,10 +259,54 @@ export default function TestFlow() {
           </div>
         )}
 
+        {/* Collect-mode batch info banner */}
+        {collectOnly && !batchActive && !preview && (
+          <div className="card" style={{ background: "var(--bg3)", marginBottom: 12,
+            borderLeft: "3px solid var(--accent)", fontSize: 11,
+            fontFamily: "var(--mono)", color: "var(--text2)", lineHeight: 1.7 }}>
+            Select <strong style={{ color: "var(--accent)" }}>one or multiple</strong> images.
+            Multiple files are automatically matched to test points in order
+            starting from <strong style={{ color: "var(--text)" }}>{currentPoint?.point_name}</strong>.
+          </div>
+        )}
+
+        {/* Batch upload progress */}
+        {batchActive && (
+          <div className="card" style={{ background: "var(--bg3)", marginBottom: 12 }}>
+            <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--accent)",
+              marginBottom: 10 }}>
+              Uploading {batchDone}/{batchTotal}...
+            </div>
+            {/* Progress bar */}
+            <div style={{ height: 4, background: "var(--border)", borderRadius: 2, marginBottom: 10 }}>
+              <div style={{ height: "100%", borderRadius: 2, background: "var(--accent)",
+                width: `${batchTotal ? (batchDone / batchTotal) * 100 : 0}%`,
+                transition: "width 0.3s ease" }} />
+            </div>
+            {/* File list */}
+            {batchNames.map((name, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8,
+                fontSize: 11, fontFamily: "var(--mono)", color: "var(--text3)",
+                marginBottom: 3 }}>
+                <span style={{ color: i < batchDone ? "var(--ok)" : i === batchDone ? "var(--accent)" : "var(--text3)" }}>
+                  {i < batchDone ? "✓" : i === batchDone ? "→" : "·"}
+                </span>
+                <span style={{ color: i < batchDone ? "var(--ok)" : "var(--text3)" }}>
+                  {points?.[currentIdx - batchDone + batchDone + i]?.point_name ?? `Point ${i + 1}`}
+                </span>
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis",
+                  whiteSpace: "nowrap", color: "var(--text3)" }}>— {name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Upload / preview */}
-        {!currentResult && (
+        {!currentResult && !batchActive && (
           <>
-            <div className="label">Captured Image</div>
+            <div className="label">
+              {collectOnly ? "Select Image(s)" : "Captured Image"}
+            </div>
             {preview ? (
               <div style={{ position: "relative", marginBottom: 12 }}>
                 <img src={preview} alt="preview"
@@ -214,12 +315,20 @@ export default function TestFlow() {
               </div>
             ) : (
               <div className="upload-zone" onClick={() => fileRef.current?.click()}>
-                <div className="icon">📷</div>
-                <p>Tap to capture / select<br />oscilloscope screenshot</p>
+                <div className="icon">{collectOnly ? "📂" : "📷"}</div>
+                <p>{collectOnly
+                  ? <>Tap to select image(s)<br /><span style={{ fontSize: 11, color: "var(--text3)" }}>Select all at once to batch-upload</span></>
+                  : <>Tap to capture / select<br />oscilloscope screenshot</>
+                }</p>
               </div>
             )}
-            <input ref={fileRef} type="file" accept="image/*" capture="environment"
-              style={{ display: "none" }} onChange={onFileChange} />
+            {/* collect mode: multiple allowed; analyze mode: camera capture */}
+            {collectOnly
+              ? <input ref={fileRef} type="file" accept="image/*" multiple
+                  style={{ display: "none" }} onChange={onFileChange} />
+              : <input ref={fileRef} type="file" accept="image/*" capture="environment"
+                  style={{ display: "none" }} onChange={onFileChange} />
+            }
           </>
         )}
 
@@ -261,13 +370,19 @@ export default function TestFlow() {
 
       {/* Bottom action */}
       <div style={{ padding: "16px 20px", background: "var(--bg2)", borderTop: "1px solid var(--border)" }}>
-        {!currentResult ? (
+        {batchActive ? (
+          /* Batch in progress — no action needed */
+          <div style={{ textAlign: "center", fontFamily: "var(--mono)", fontSize: 11,
+            color: "var(--text3)" }}>
+            Uploading batch — please wait…
+          </div>
+        ) : !currentResult ? (
           <button className="btn btn-primary"
             disabled={!file || analyzeMutation.isPending}
             onClick={() => analyzeMutation.mutate()}>
             {analyzeMutation.isPending
-              ? <><div style={{ width: 16, height: 16, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Analyzing...</>
-              : "▶  Analyze Curve"}
+              ? <><div style={{ width: 16, height: 16, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> {collectOnly ? "Saving..." : "Analyzing..."}</>
+              : collectOnly ? "▶  Save Image" : "▶  Analyze Curve"}
           </button>
         ) : (
           <div style={{ display: "flex", gap: 10 }}>
@@ -287,10 +402,10 @@ export default function TestFlow() {
         <div className="processing-overlay">
           <div className="processing-circle" />
           <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--accent)", letterSpacing: 2 }}>
-            ANALYZING CURVE...
+            {collectOnly ? "SAVING IMAGE..." : "ANALYZING CURVE..."}
           </div>
           <div style={{ fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>
-            Skeletonization · DTW · Diagnosis
+            {collectOnly ? "Uploading to dataset" : "Skeletonization · DTW · Diagnosis"}
           </div>
         </div>
       )}

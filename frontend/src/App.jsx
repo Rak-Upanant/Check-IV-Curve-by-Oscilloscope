@@ -3,11 +3,16 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "react-hot-toast";
-import BoardSelect from "./pages/BoardSelect";
-import SessionSetup from "./pages/SessionSetup";
-import TestFlow from "./pages/TestFlow";
+
+import BoardSelect    from "./pages/BoardSelect";      // Home — landing page
+import AnalyzeSetup   from "./pages/AnalyzeSetup";    // Analysis board + tech select
+import CollectSetup   from "./pages/CollectSetup";     // Create Report — multi-board + Tag NO
+import CollectFlow    from "./pages/CollectFlow";      // One-page image collector
+import TestFlow       from "./pages/TestFlow";         // Point-by-point analysis
 import SessionSummary from "./pages/SessionSummary";
-import MasterUpload from "./pages/MasterUpload";
+import MasterUpload   from "./pages/MasterUpload";
+import DebugAnalyzer  from "./pages/DebugAnalyzer";
+import Dashboard      from "./pages/Dashboard";
 import "./styles.css";
 
 const queryClient = new QueryClient();
@@ -18,12 +23,34 @@ export default function App() {
       <BrowserRouter>
         <div className="app">
           <Routes>
-            <Route path="/"                        element={<BoardSelect />} />
-            <Route path="/session/:boardId"        element={<SessionSetup />} />
-            <Route path="/test/:sessionId"         element={<TestFlow />} />
-            <Route path="/summary/:sessionId"      element={<SessionSummary />} />
-            <Route path="/master/:boardId"         element={<MasterUpload />} />
-            <Route path="*"                        element={<Navigate to="/" />} />
+            {/* Home — clean landing page, no board list */}
+            <Route path="/"                             element={<BoardSelect />} />
+
+            {/* Analysis — board select + technician → TestFlow */}
+            <Route path="/analyze"                      element={<AnalyzeSetup />} />
+
+            {/* Create Report — multi-board checkbox + Tag NO */}
+            <Route path="/collect"                      element={<CollectSetup />} />
+
+            {/* One-page image collector (collect mode, multi-board) */}
+            <Route path="/collect-flow"                 element={<CollectFlow />} />
+
+            {/* Point-by-point analysis flow */}
+            <Route path="/test/:sessionId"              element={<TestFlow />} />
+
+            {/* Session summary + PDF */}
+            <Route path="/summary/:sessionId"           element={<SessionSummary />} />
+
+            {/* Master signature management */}
+            <Route path="/master/:boardId"              element={<MasterUpload />} />
+
+            {/* Inspection history dashboard */}
+            <Route path="/dashboard"                    element={<Dashboard />} />
+
+            {/* Pipeline debug visualizer */}
+            <Route path="/debug"                        element={<DebugAnalyzer />} />
+
+            <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </div>
         <Toaster

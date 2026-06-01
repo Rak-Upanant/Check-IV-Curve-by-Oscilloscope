@@ -2,7 +2,7 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY frontend/package.json .
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps && npm rebuild
 COPY frontend/ .
 ARG REACT_APP_API_URL
 ENV REACT_APP_API_URL=$REACT_APP_API_URL
