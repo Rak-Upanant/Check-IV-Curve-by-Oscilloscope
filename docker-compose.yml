@@ -20,7 +20,7 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        REACT_APP_API_URL: http://localhost:8000
+        VITE_API_URL: http://localhost:8000
     ports:
       - "3002:80"     # 3002 so docker preview doesn't conflict with npm start (3000)
     depends_on:

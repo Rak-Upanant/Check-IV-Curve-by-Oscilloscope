@@ -2,6 +2,7 @@
   "name": "iv-signature-pwa",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -11,20 +12,15 @@
     "react-camera-pro": "^1.4.0",
     "@tanstack/react-query": "^5.40.0",
     "axios": "^1.7.2",
-    "react-hot-toast": "^2.4.1",
-    "react-scripts": "5.0.1",
-    "ajv": "^6.12.6",
-    "ajv-keywords": "^3.5.2"
+    "react-hot-toast": "^2.4.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0",
+    "@vitejs/plugin-react": "^4.3.0"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test"
-  },
-  "browserslist": {
-    "production": [">0.2%", "not dead"],
-    "development": ["last 1 chrome version"]
-  },
-  "homepage": ".",
-  "proxy": "http://localhost:8000"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  }
 }

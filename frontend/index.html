@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="IV·SIG" />
-  <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+  <link rel="manifest" href="/manifest.json" />
   <title>IV·SIG — Signature Analyzer</title>
   <style>
     body { margin: 0; background: #080c14; }
@@ -17,5 +17,7 @@
 </head>
 <body>
   <div id="root"></div>
+  <!-- Vite entry point: must be a module script referencing the source file -->
+  <script type="module" src="/src/index.jsx"></script>
 </body>
 </html>

@@ -1,15 +1,15 @@
 // frontend/src/lib/api.js
 import axios from "axios";
 
-// Development:  baseURL = ""  → requests go to same origin (e.g. localhost:3000)
-//               CRA "proxy" in package.json forwards them to localhost:8000
-//               → zero CORS issues, works regardless of which port React is on
+// Development:  baseURL = ""  → requests go to same origin (localhost:3000).
+//               Vite's server.proxy (vite.config.js) forwards them to
+//               localhost:8000 → zero CORS issues.
 //
-// Production:   REACT_APP_API_URL is set in Render env vars to the deployed
-//               backend URL (https://iv-sig-api.onrender.com)
-//               → direct cross-origin request, backend allows_origins=["*"]
+// Production:   VITE_API_URL is set at build time (Render env var) to the
+//               deployed backend URL (https://iv-sig-api.onrender.com)
+//               → direct cross-origin request.
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || "",
+  baseURL: import.meta.env.VITE_API_URL || "",
   timeout: 60000,
 });
 

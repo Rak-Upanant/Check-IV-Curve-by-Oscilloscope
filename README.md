@@ -143,12 +143,14 @@ IV_Oscilloscope/
 │   ├── storage.py         # Supabase Storage upload helpers
 │   ├── pdf_generator.py   # ReportLab PDF (incl. photo grid)
 │   └── requirements.txt
-├── frontend/
-│   ├── .env               # PORT=3000 (locks CRA dev port)
+├── frontend/                # React app built with Vite
+│   ├── index.html         # Vite entry HTML (app root)
+│   ├── vite.config.js     # dev server :3000 + API proxy to :8000
 │   └── src/
+│       ├── index.jsx                # React entry point
 │       ├── App.jsx                  # Routes
 │       ├── styles.css               # Dark oscilloscope theme
-│       ├── lib/api.js               # Axios client (CRA proxy in dev)
+│       ├── lib/api.js               # Axios client (Vite proxy in dev)
 │       └── pages/
 │           ├── BoardSelect.jsx      # Home landing page
 │           ├── AnalyzeSetup.jsx     # Analysis mode setup
@@ -231,9 +233,9 @@ SUPABASE_URL=https://xxxx.supabase.co
 SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiI...
 ```
 
-Do **not** set `REACT_APP_API_URL` locally — the CRA dev server proxies API
-calls to `localhost:8000` via the `"proxy"` field in `frontend/package.json`,
-which avoids CORS entirely. `frontend/.env` pins the dev server to port 3000.
+Do **not** set `VITE_API_URL` locally — Vite's dev server proxies API calls to
+`localhost:8000` (see `frontend/vite.config.js`), which avoids CORS entirely.
+The dev server is pinned to port 3000 (`strictPort`).
 
 ### 3 — Run Locally
 
@@ -244,12 +246,12 @@ uvicorn backend.main:app --reload --port 8000
 
 # Terminal 2 — frontend
 cd frontend
-npm install --legacy-peer-deps
-npm start          # http://localhost:3000
+npm install
+npm run dev        # http://localhost:3000
 ```
 
 Docker alternative: `docker-compose up --build` → backend `:8000`,
-frontend `:3002` (3002 so it never collides with `npm start`).
+frontend `:3002` (3002 so it never collides with `npm run dev`).
 
 ### 4 — Smoke Test the Pipeline
 

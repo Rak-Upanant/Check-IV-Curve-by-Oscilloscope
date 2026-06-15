@@ -26,14 +26,14 @@ services:
   - type: web
     name: iv-sig-app
     runtime: static
-    # Install deps and build the React app (legacy-peer-deps matches the old Dockerfile).
-    buildCommand: cd frontend && npm install --legacy-peer-deps && npm run build
-    # Create React App outputs to frontend/build (relative to repo root).
-    staticPublishPath: ./frontend/build
+    # Install deps and build the React app with Vite.
+    buildCommand: cd frontend && npm install && npm run build
+    # Vite outputs to frontend/dist (relative to repo root).
+    staticPublishPath: ./frontend/dist
     autoDeploy: true
     envVars:
-      # Available at build time; Create React App bakes REACT_APP_* into the bundle.
-      - key: REACT_APP_API_URL
+      # Available at build time; Vite bakes VITE_* into the bundle.
+      - key: VITE_API_URL
         value: https://iv-sig-api.onrender.com   # backend API (confirmed live)
     # SPA rewrite: send every non-file path to index.html so client-side
     # routing and page refreshes work instead of returning 404.
