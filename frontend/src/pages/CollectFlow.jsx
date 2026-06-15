@@ -12,6 +12,7 @@ import {
   getSession, getTestPoints,
   collectImage,
 } from "../lib/api";
+import { enqueue, getAll as getQueued, remove as removeQueued } from "../lib/offlineQueue";
 import toast from "react-hot-toast";
 
 // ── Component type badge colours ─────────────────────────────
@@ -30,6 +31,7 @@ function PointRow({ point, status, onUpload }) {
   const uploaded  = state === "uploaded";
   const uploading = state === "uploading";
   const errored   = state === "error";
+  const queued    = state === "queued";   // saved offline, waiting to sync
 
   return (
     <div style={{
@@ -44,6 +46,7 @@ function PointRow({ point, status, onUpload }) {
           width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
           background: uploaded ? "var(--ok)"
             : errored   ? "var(--fault)"
+            : queued    ? "var(--warning)"
             : uploading ? "var(--accent)"
             : "var(--border2)",
           boxShadow: uploading ? "0 0 0 3px rgba(0,212,255,0.2)" : undefined,
@@ -84,6 +87,11 @@ function PointRow({ point, status, onUpload }) {
               Upload failed
             </div>
           )}
+          {queued && (
+            <div style={{ fontSize: 10, color: "var(--warning)", fontFamily: "var(--mono)", marginTop: 1 }}>
+              ⧗ Saved offline — will sync
+            </div>
+          )}
         </div>
 
         {/* Action button */}
@@ -97,12 +105,12 @@ function PointRow({ point, status, onUpload }) {
             ? <div style={{ width: 12, height: 12, border: "2px solid currentColor",
                 borderTopColor: "transparent", borderRadius: "50%",
                 animation: "spin 0.7s linear infinite" }} />
-            : uploaded ? "Replace" : errored ? "Retry" : "Upload"}
+            : uploaded ? "Replace" : errored ? "Retry" : queued ? "Re-pick" : "Upload"}
         </button>
       </div>
 
-      {/* Thumbnail */}
-      {uploaded && imageUrl && (
+      {/* Thumbnail (uploaded or queued-offline both show a preview) */}
+      {(uploaded || queued) && imageUrl && (
         <img
           src={imageUrl} alt={point.point_name}
           style={{
@@ -277,6 +285,11 @@ export default function CollectFlow() {
   const [batchActive,   setBatchActive]   = useState(false);
   const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0 });
 
+  // ── Offline state ─────────────────────────────────────────
+  const [online,    setOnline]    = useState(navigator.onLine);
+  const [queueCount, setQueueCount] = useState(0);   // uploads waiting offline
+  const [syncing,   setSyncing]   = useState(false);
+
   // File input refs
   const singleRef      = useRef();
   const batchRef       = useRef();
@@ -335,13 +348,20 @@ export default function CollectFlow() {
 
   // ── Core upload ───────────────────────────────────────────
   const uploadToPoint = async (sessionId, pointId, file) => {
-    const key = sk(sessionId, pointId);
+    const key  = sk(sessionId, pointId);
+    const sn   = serials[sessionId] ?? "";
+    const type = boardTypes[sessionId] ?? "";
+    // Combine type + serial so storage path captures both: AGDR-71C_SN-001
+    const serial = type && sn ? `${type}_${sn}` : type || sn;
+
+    // Offline: don't even try the network — queue it and show a local preview.
+    if (!navigator.onLine) {
+      await queueOffline(sessionId, pointId, file, serial);
+      return;
+    }
+
     setPointStatus(prev => ({ ...prev, [key]: { state: "uploading" } }));
     try {
-      const sn   = serials[sessionId] ?? "";
-      const type = boardTypes[sessionId] ?? "";
-      // Combine type + serial so storage path captures both: AGDR-71C_SN-001
-      const serial = type && sn ? `${type}_${sn}` : type || sn;
       const result = await collectImage(sessionId, pointId, file, serial);
       // Cache-buster: the storage path is a fixed filename per point, so a
       // re-upload returns the SAME url. Without a unique query string the
@@ -353,10 +373,92 @@ export default function CollectFlow() {
         [key]: { state: "uploaded", imageUrl: freshUrl, fileName: file.name },
       }));
     } catch {
-      setPointStatus(prev => ({ ...prev, [key]: { state: "error" } }));
-      toast.error("Upload failed");
+      // The request failed. If we dropped offline mid-upload, queue it;
+      // otherwise it's a real server error.
+      if (!navigator.onLine) {
+        await queueOffline(sessionId, pointId, file, serial);
+      } else {
+        setPointStatus(prev => ({ ...prev, [key]: { state: "error" } }));
+        toast.error("Upload failed");
+      }
     }
   };
+
+  // Save an upload to IndexedDB and mark the point as "queued" with a
+  // local thumbnail (so the technician sees their photo even while offline).
+  const queueOffline = async (sessionId, pointId, file, serial) => {
+    const key = sk(sessionId, pointId);
+    await enqueue({ sessionId, pointId, serial, file, fileName: file.name });
+    setPointStatus(prev => ({
+      ...prev,
+      [key]: { state: "queued", imageUrl: URL.createObjectURL(file), fileName: file.name },
+    }));
+    setQueueCount(c => c + 1);
+    toast("Saved offline — will sync when online", { icon: "⧗" });
+  };
+
+  // ── Drain the offline queue (called on reconnect or manual Sync) ──
+  const flushQueue = async () => {
+    if (syncing) return;
+    const items = await getQueued();
+    if (items.length === 0) return;
+    setSyncing(true);
+    let synced = 0;
+    for (const item of items) {
+      const key = sk(item.sessionId, item.pointId);
+      try {
+        const result = await collectImage(item.sessionId, item.pointId, item.file, item.serial);
+        await removeQueued(item.id);
+        synced++;
+        setPointStatus(prev => ({
+          ...prev,
+          [key]: { state: "uploaded", imageUrl: `${result.image_url}?t=${Date.now()}`, fileName: item.fileName },
+        }));
+      } catch {
+        // Still failing (probably offline again) — leave it queued and stop.
+        break;
+      }
+    }
+    const remaining = await getQueued();
+    setQueueCount(remaining.length);
+    setSyncing(false);
+    if (synced > 0) toast.success(`Synced ${synced} offline upload${synced !== 1 ? "s" : ""}`);
+  };
+
+  // ── Online/offline wiring + restore queued items on load ──
+  useEffect(() => {
+    let cancelled = false;
+
+    // On mount: load anything queued from a previous (offline) visit and
+    // show it as "queued" with a thumbnail rebuilt from the stored file.
+    (async () => {
+      const items = await getQueued();
+      if (cancelled) return;
+      setQueueCount(items.length);
+      setPointStatus(prev => {
+        const next = { ...prev };
+        for (const it of items) {
+          const key = sk(it.sessionId, it.pointId);
+          if (!next[key]) {
+            next[key] = { state: "queued", imageUrl: URL.createObjectURL(it.file), fileName: it.fileName };
+          }
+        }
+        return next;
+      });
+      if (navigator.onLine && items.length) flushQueue();
+    })();
+
+    const goOnline  = () => { setOnline(true);  flushQueue(); };
+    const goOffline = () => { setOnline(false); };
+    window.addEventListener("online",  goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("online",  goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Single file handler ───────────────────────────────────
   const onSingleChange = async (e) => {
@@ -423,6 +525,38 @@ export default function CollectFlow() {
           {uploadedTotal}/{totalAll} {allDoneGlobal && "✓"}
         </span>
       </div>
+
+      {/* ── Offline / sync banner ───────────────────────────── */}
+      {(!online || queueCount > 0) && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "8px 16px",
+          background: online ? "rgba(255,179,0,0.08)" : "rgba(255,61,61,0.08)",
+          borderBottom: `1px solid ${online ? "var(--warning)" : "var(--fault)"}40`,
+          fontFamily: "var(--mono)", fontSize: 11,
+          color: online ? "var(--warning)" : "var(--fault)",
+        }}>
+          <span style={{ flex: 1 }}>
+            {online
+              ? `${queueCount} upload${queueCount !== 1 ? "s" : ""} saved offline, ready to sync`
+              : `⚠ Offline — uploads are saved on this device${queueCount > 0 ? ` (${queueCount} pending)` : ""}`}
+          </span>
+          {online && queueCount > 0 && (
+            <button
+              onClick={flushQueue}
+              disabled={syncing}
+              style={{
+                background: "none", border: "1px solid var(--warning)",
+                borderRadius: 4, cursor: "pointer", padding: "4px 12px",
+                fontSize: 10, fontFamily: "var(--mono)", color: "var(--warning)",
+                flexShrink: 0,
+              }}
+            >
+              {syncing ? "Syncing…" : "↻ Sync now"}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="section" style={{ paddingTop: 16 }}>
 

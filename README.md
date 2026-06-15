@@ -151,6 +151,7 @@ IV_Oscilloscope/
 │       ├── App.jsx                  # Routes
 │       ├── styles.css               # Dark oscilloscope theme
 │       ├── lib/api.js               # Axios client (Vite proxy in dev)
+│       ├── lib/offlineQueue.js      # IndexedDB queue for offline uploads
 │       └── pages/
 │           ├── BoardSelect.jsx      # Home landing page
 │           ├── AnalyzeSetup.jsx     # Analysis mode setup
