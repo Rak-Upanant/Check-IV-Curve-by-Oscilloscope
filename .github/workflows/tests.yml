@@ -1,0 +1,33 @@
+# Runs the backend pipeline tests on every push and pull request.
+# These tests only exercise backend/iv_engine.py (image processing + scoring),
+# which needs no database — so no Supabase secrets are required here.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out the repo so the workflow can see the code + test_pic/ images
+      - uses: actions/checkout@v4
+
+      # 2. Install Python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # 3. Install backend + test dependencies
+      #    (opencv-python-headless needs no system GUI libraries)
+      - name: Install dependencies
+        run: pip install -r backend/requirements-dev.txt
+
+      # 4. Run the test suite
+      - name: Run pytest
+        run: pytest backend/tests/ -v

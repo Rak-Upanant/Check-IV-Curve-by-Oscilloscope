@@ -43,15 +43,19 @@ app.add_middleware(
 
 # ─── CORS-SAFE EXCEPTION HANDLER ─────────────────────────────
 # FastAPI's CORSMiddleware does NOT add headers to unhandled 500s.
-# This handler adds them explicitly so the browser sees the real error
-# message instead of a silent CORS block.
+# This handler adds them explicitly so the browser sees a clean error
+# instead of a silent CORS block.
+#
+# Security: the full traceback (which can contain table names, query text,
+# and other internals) is written ONLY to the server log. The browser
+# receives a generic message so we don't leak implementation details.
 @app.exception_handler(Exception)
 async def _unhandled(request: Request, exc: Exception):
     tb = traceback.format_exc()
     print(f"[UNHANDLED] {request.method} {request.url}\n{tb}")
     return JSONResponse(
         status_code=500,
-        content={"detail": str(exc)},
+        content={"detail": "Internal server error. Please try again."},
         headers={"Access-Control-Allow-Origin": _ALLOWED_ORIGIN},
     )
 
@@ -134,6 +138,11 @@ def get_session(session_id: str):
            .eq("session_id", session_id)
            .single()
            .execute())
+    # Attach public image URL to each result so the collector can show
+    # thumbnails for points that were already uploaded (e.g. after a refresh).
+    for result in (res.data.get("test_results") or []):
+        if result.get("image_path"):
+            result["image_url"] = get_public_url(result["image_path"])
     return res.data
 
 @app.patch("/sessions/{session_id}/complete")
@@ -366,6 +375,16 @@ async def collect_image(
 
     try:
         upload_image(tmp_path, storage_path)
+
+        # Re-upload safety: remove any previous result for this exact
+        # (session, point) so "Replace" updates the record instead of
+        # creating a duplicate row. The storage file is already overwritten
+        # (fixed filename + upsert), so only the DB row needs cleaning.
+        (supabase.table("test_results")
+         .delete()
+         .eq("session_id", session_id)
+         .eq("point_id", point_id)
+         .execute())
 
         row = {
             "session_id": session_id,

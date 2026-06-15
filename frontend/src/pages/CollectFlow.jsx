@@ -5,7 +5,7 @@
 // Collect-only mode: upload oscilloscope photos for each test point.
 // PDF generation is done from the Inspection Dashboard, not here.
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -293,6 +293,35 @@ export default function CollectFlow() {
     enabled: sessionIds.length > 0,
   });
 
+  // ── Rehydrate already-uploaded points after a page refresh ─
+  // The backend returns each session's existing test_results (with image_url).
+  // Seed those into pointStatus so previously collected points show as
+  // "uploaded" with their thumbnail — instead of resetting to "Upload"
+  // (which would let the user accidentally re-upload).
+  useEffect(() => {
+    if (!allData) return;
+    setPointStatus(prev => {
+      const next = { ...prev };
+      for (const { session } of allData) {
+        for (const r of session.test_results ?? []) {
+          const key = sk(session.session_id, r.point_id);
+          // Don't clobber an upload the user is doing right now
+          if (next[key]) continue;
+          if (r.status === "collected" && r.image_url) {
+            next[key] = {
+              state: "uploaded",
+              // Cache-buster (same reason as upload): fixed filename means the
+              // url is reused on replace, so force a fresh fetch on load.
+              imageUrl: `${r.image_url}?t=${Date.now()}`,
+              fileName: null,   // original filename isn't stored; thumbnail still shows
+            };
+          }
+        }
+      }
+      return next;
+    });
+  }, [allData]);
+
   // ── Derived counts ────────────────────────────────────────
   const uploadedTotal = Object.values(pointStatus).filter(s => s?.state === "uploaded").length;
   const totalAll = allData?.reduce((n, { points }) => n + points.length, 0) ?? 0;
@@ -314,9 +343,14 @@ export default function CollectFlow() {
       // Combine type + serial so storage path captures both: AGDR-71C_SN-001
       const serial = type && sn ? `${type}_${sn}` : type || sn;
       const result = await collectImage(sessionId, pointId, file, serial);
+      // Cache-buster: the storage path is a fixed filename per point, so a
+      // re-upload returns the SAME url. Without a unique query string the
+      // browser would keep showing the cached (old) image. Date.now()
+      // forces it to fetch the freshly uploaded one.
+      const freshUrl = `${result.image_url}?t=${Date.now()}`;
       setPointStatus(prev => ({
         ...prev,
-        [key]: { state: "uploaded", imageUrl: result.image_url, fileName: file.name },
+        [key]: { state: "uploaded", imageUrl: freshUrl, fileName: file.name },
       }));
     } catch {
       setPointStatus(prev => ({ ...prev, [key]: { state: "error" } }));

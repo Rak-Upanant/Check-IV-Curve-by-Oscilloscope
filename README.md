@@ -4,6 +4,8 @@ In-circuit IGBT board inspection via oscilloscope I-V curve comparison.
 
 **Stack:** FastAPI · Python OpenCV/scikit-image · Supabase · React PWA · Docker · Render.com
 
+**Live:** [iv-sig-app.onrender.com](https://iv-sig-app.onrender.com) (frontend) · [iv-sig-api.onrender.com/health](https://iv-sig-api.onrender.com/health) (backend) — see [DEPLOYMENT.md](DEPLOYMENT.md) for the full deployment record.
+
 ---
 
 ## App Flow
@@ -12,17 +14,10 @@ In-circuit IGBT board inspection via oscilloscope I-V curve comparison.
 ┌──────────────────────────────────────────────────────────┐
 │  HOME  (/)                                               │
 │                                                          │
-│  ┌─────────────────────────────┐                        │
-│  │  IGBT_BOARD_V1  ›           │  ← tap to expand       │
-│  │  ─────────────────────────  │                        │
-│  │  Technician Name: [      ]  │  ← inline form         │
-│  │  [ ▶ Start Analysis ]       │  → TestFlow (analyze)  │
-│  └─────────────────────────────┘                        │
-│  ┌─────────────────────────────┐                        │
-│  │  IGBT_BOARD_V2  ›           │                        │
-│  └─────────────────────────────┘                        │
-│                                                          │
-│  [ 📄 Create Report ]          → /collect               │
+│  [ ▶  Start Analysis ]      → /analyze  (compare mode)  │
+│  [ 📄 Create Report ]       → /collect  (collect mode)  │
+│  ──────────────────────────                              │
+│  [ 📊 Inspection Dashboard ]                             │
 │  [ ⚙  Upload Master Signatures ]                        │
 │  [ 🔬 Pipeline Debugger ]                               │
 └──────────────────────────────────────────────────────────┘
@@ -30,33 +25,63 @@ In-circuit IGBT board inspection via oscilloscope I-V curve comparison.
 ┌──────────────────────────────────────────────────────────┐
 │  CREATE REPORT  (/collect)                               │
 │                                                          │
-│  Board Type:  ◉ IGBT_BOARD_V1                           │
-│               ○ IGBT_BOARD_V2                           │
-│               ○ IGBT_BOARD_V3                           │
+│  Tag NO: [ INS-2025-001 ]   ← inspection identifier     │
 │                                                          │
-│  Technician Name: [                    ]                 │
-│  Board Serial:    [                    ]  (optional)     │
-│  Notes:           [                    ]  (optional)     │
+│  Select Boards (multi-select checkboxes):                │
+│    ☑ AGDR_Board                                          │
+│    ☐ IGBT_BOARD_V2                                       │
+│    ☐ IGBT_BOARD_V3                                       │
 │                                                          │
-│  [ Begin Collection → ]  → TestFlow (collect)           │
+│  [ Begin Collection → ]   creates 1 session per board   │
 └──────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────┐
-│  TEST FLOW  (/test/:sessionId)                           │
+│  COLLECT FLOW  (/collect-flow)  — upload only            │
 │                                                          │
-│  ANALYZE mode:                                           │
-│    For each test point:                                  │
-│    Upload image → pipeline runs → score + diagnosis      │
-│    Master reference shown for comparison                 │
-│    → Session Summary → PDF report                        │
+│  One accordion section per board:                        │
+│    • Board Serial / Unit ID input                        │
+│    • Type selector: AGDR-71C / AGDR-76C                  │
+│    • Upload button per test point (+ thumbnail)          │
+│  📂 batch upload assigns files across all boards         │
 │                                                          │
-│  COLLECT mode:                                           │
-│    Select one image OR multiple images at once           │
-│    Multiple files auto-assigned to consecutive points    │
-│    No analysis, no master reference shown                │
-│    → Session Summary → PDF report                        │
+│  No PDF here — reports are generated from the Dashboard. │
+└──────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────┐
+│  INSPECTION DASHBOARD  (/dashboard)                      │
+│                                                          │
+│  Sessions grouped by Tag NO, newest first                │
+│  Per board: points collected, status badge, expandable   │
+│  point-results table                                     │
+│                                                          │
+│  [ Load PDF ]  → generates report (with photos), saves   │
+│  the link to the session — shows as [↓ PDF] forever      │
+│  Auto-refreshes every 30 s · manual ↻ button             │
 └──────────────────────────────────────────────────────────┘
 ```
+
+Analysis mode (`/analyze` → `/test/:sessionId`) still exists: upload an image per
+test point, the pipeline compares it to the master signature and returns a
+similarity score + diagnosis.
+
+---
+
+## Boards & Test Points (seed data)
+
+**AGDR_Board** — the primary board:
+
+| Point | Type |
+|---|---|
+| Gate-Emitter_13-14 | diode |
+| Gate-Emitter_16-17 | diode |
+| Gate-Emitter_18-19 | diode |
+| Gate-Emitter_21-22 | diode |
+| Gate-Emitter_23-24 | diode |
+| Gate-Emitter_26-27 | diode |
+| NTC Thermistor_28-29 | resistive |
+
+Plus mock boards `IGBT_BOARD_V2` (6 points) and `IGBT_BOARD_V3` (8 points) for
+multi-board testing. Seeds live in [supabase/schema.sql](supabase/schema.sql).
 
 ---
 
@@ -73,51 +98,37 @@ Oscilloscope PNG (direct export, fixed size & axis range)
     │  High [45, 255, 255]   extracts yellow trace pixels
     │
     ▼  Blob-size filter  (keep ≥ 15 px connected components)
-    │  No MORPH_CLOSE / MORPH_OPEN — preserves two-branch loop
-    │  In-circuit IGBTs produce a capacitive loop curve where
-    │  the same voltage has TWO current values (outgoing + return
-    │  AC sweep trace). Morphological ops would merge these branches.
+    │  No MORPH_CLOSE / MORPH_OPEN — preserves two-branch loop.
+    │  In-circuit IGBTs produce a capacitive loop curve where the same
+    │  voltage has TWO current values (outgoing + return AC sweep trace).
+    │  Morphological ops would merge these branches.
     │
     ▼  Skeletonization  (Zhang-Suen, scikit-image)
     │  Thins mask to 1-pixel-wide centerline
     │
     ▼  Coordinate extraction → V/I scatter
     │  Pixel (x,y) → V ∈ [−10, +10]  I ∈ [−12, +10]  (fixed axis)
-    │  Two-branch loop visible here as two I values at same V
     │
     ▼  Feature extraction  (on raw scatter coords)
     │  slope, r², enclosed_area, bbox_aspect, fill_ratio
     │
     ▼  Shape classification
     │  bbox_aspect > 3.0  → resistive (NTC thermistor)
-    │  bbox_aspect > 1.2  → capacitive_loop (suspect fault)
-    │  else               → diode (normal in-circuit diode)
+    │  bbox_aspect > 1.2  → capacitive_loop
+    │  else               → diode
     │
-    ▼  Resample to 256 pts on shared V axis  (DTW input only)
-    │  NOTE: np.interp collapses two-branch → single-valued here.
-    │  Step above (scatter) is the faithful two-branch representation.
+    ▼  Resample to 256 pts on shared V axis  (DTW input only —
+    │  np.interp collapses the two-branch loop to single-valued here)
     │
-    ▼  DTW similarity vs master
-    │  Both curves normalized to [−1,+1] before DTW
+    ▼  DTW similarity vs master  (curves normalized to [−1,+1])
     │  score = max(0, 1 − DTW/n) × 100
     │
     ▼  Diagnosis
        Shape mismatch  → FAULT  (cap_leakage / diode_degradation)
-       score ≥ 85      → OK     (normal)
-       score ≥ 60      → WARNING (degraded)
-       score < 60      → FAULT  (degraded)
+       score ≥ 85      → OK
+       score ≥ 60      → WARNING
+       score < 60      → FAULT
 ```
-
----
-
-## Score Thresholds
-
-| Score | Status | Meaning |
-|---|---|---|
-| ≥ 85 + shape match | OK | Component matches master |
-| 60 – 84 | WARNING | Slight deviation — monitor |
-| < 60 | FAULT | Significant deviation — inspect |
-| shape mismatch | FAULT | Wrong curve type regardless of score |
 
 ---
 
@@ -127,31 +138,39 @@ Oscilloscope PNG (direct export, fixed size & axis range)
 IV_Oscilloscope/
 ├── backend/
 │   ├── main.py            # FastAPI app + all API endpoints
-│   ├── iv_engine.py       # Full image processing pipeline
-│   ├── database.py        # Supabase client (loads .env)
+│   ├── iv_engine.py       # Image processing pipeline + DTW scoring
+│   ├── database.py        # Supabase client (loads root .env)
 │   ├── storage.py         # Supabase Storage upload helpers
-│   ├── pdf_generator.py   # ReportLab PDF generation
+│   ├── pdf_generator.py   # ReportLab PDF (incl. photo grid)
 │   └── requirements.txt
 ├── frontend/
+│   ├── .env               # PORT=3000 (locks CRA dev port)
 │   └── src/
 │       ├── App.jsx                  # Routes
 │       ├── styles.css               # Dark oscilloscope theme
-│       ├── lib/api.js               # Axios API client
+│       ├── lib/api.js               # Axios client (CRA proxy in dev)
 │       └── pages/
-│           ├── BoardSelect.jsx      # Home — Analysis mode
-│           ├── CollectSetup.jsx     # Create Report — Collect mode
-│           ├── TestFlow.jsx         # Core test workflow (both modes)
-│           ├── SessionSummary.jsx   # Results + PDF download
+│           ├── BoardSelect.jsx      # Home landing page
+│           ├── AnalyzeSetup.jsx     # Analysis mode setup
+│           ├── CollectSetup.jsx     # Create Report — multi-board + Tag NO
+│           ├── CollectFlow.jsx      # Upload-only collector (per-board accordion)
+│           ├── TestFlow.jsx         # Point-by-point analysis flow
+│           ├── SessionSummary.jsx   # Analysis results + PDF
+│           ├── Dashboard.jsx        # Inspection history + Load PDF
 │           ├── MasterUpload.jsx     # Upload reference signatures
 │           └── DebugAnalyzer.jsx    # Step-by-step pipeline debugger
 ├── supabase/
-│   └── schema.sql         # Tables + indexes + seed data
-├── test_pic/              # Sample oscilloscope images for testing
+│   ├── schema.sql             # Tables + RLS + seed boards/points
+│   ├── add_report_url.sql     # Migration: report_url column
+│   ├── seed_boards_v2_v3.sql  # Mock boards V2/V3
+│   └── update_names.sql       # AGDR_Board / Gate-Emitter renames
+├── test_pic/              # Sample oscilloscope images
 ├── Dockerfile             # Backend container
 ├── Dockerfile.frontend    # Frontend (nginx)
-├── docker-compose.yml     # Local development
-├── render.yaml            # Render.com deployment blueprint
-└── .env                   # Secrets (never commit)
+├── docker-compose.yml     # Local: backend :8000, frontend :3002
+├── render.yaml            # Render.com Blueprint
+├── DEPLOYMENT.md          # Live URLs, env vars, free-tier gotchas
+└── .env                   # Secrets (never committed — see .env.example)
 ```
 
 ---
@@ -160,18 +179,22 @@ IV_Oscilloscope/
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/health` | Health check |
+| GET | `/health` | Health check (GET + HEAD for uptime monitors) |
 | GET | `/boards` | List all boards |
 | GET | `/boards/{id}/points` | Test points + master signatures |
-| GET | `/boards/{id}/history` | Past sessions |
-| POST | `/boards/{board_id}/points/{point_id}/master` | Upload master image |
-| POST | `/sessions` | Create test session |
+| GET | `/boards/{id}/history` | Past sessions for one board |
+| GET | `/sessions` | All sessions (dashboard) incl. `report_url` |
 | GET | `/sessions/{id}` | Session + results |
+| POST | `/sessions` | Create test session |
 | PATCH | `/sessions/{id}/complete` | Mark session done |
-| POST | `/sessions/{id}/analyze?point_id=` | Upload + analyze (compare vs master) |
-| POST | `/sessions/{id}/collect?point_id=` | Upload + store only (no analysis) |
-| POST | `/sessions/{id}/report` | Generate PDF report |
+| POST | `/sessions/{id}/analyze?point_id=` | Upload + analyze vs master |
+| POST | `/sessions/{id}/collect?point_id=&serial=` | Upload + store only |
+| POST | `/sessions/{id}/report` | Generate PDF (saves `report_url`) |
+| POST | `/boards/{board_id}/points/{point_id}/master` | Upload master image |
 | POST | `/debug/analyze?point_id=` | Full pipeline debug with step images |
+
+Uploads are capped at **10 MB**. CORS origin is set by the `ALLOWED_ORIGIN`
+env var (defaults to `*` for local dev).
 
 ---
 
@@ -179,15 +202,16 @@ IV_Oscilloscope/
 
 ```
 iv-signatures/          ← bucket (public)
-├── masters/
-│   └── {board_id}/{point_id}/{uuid}.png
-├── results/
-│   └── {session_id}/{point_id}/{uuid}.png
-├── collected/
-│   └── {session_id}/{point_id}/{uuid}.png
-└── reports/
-    └── {session_id}/report.pdf
+├── masters/{board_id}/{point_id}/{uuid}.png
+├── results/{session_id}/{point_id}/{uuid}.png        ← analysis mode
+├── collected/{tag_no}/{board_name}/{serial}/{point_name}.png
+│       fixed filename per point → re-upload replaces the image
+└── reports/{tag_no}/{board_name}/report_{YYYYMMDD}_{sid8}.pdf
 ```
+
+The PDF report embeds the collected photos in a 2-column grid and its URL is
+persisted on the session (`test_sessions.report_url`) so the Dashboard shows
+a download link without regenerating.
 
 ---
 
@@ -195,44 +219,39 @@ iv-signatures/          ← bucket (public)
 
 ### 1 — Supabase
 
-1. [supabase.com](https://supabase.com) → New Project → Region: **Southeast Asia (Singapore)**
-2. **SQL Editor** → paste `supabase/schema.sql` → Run
-3. **Storage** → New bucket → name: `iv-signatures` → toggle **Public** ON
-4. **Project Settings → API** → copy:
-   - `Project URL` → `SUPABASE_URL` (format: `https://xxxx.supabase.co`)
-   - `service_role` key → `SUPABASE_SERVICE_KEY` (starts with `eyJ…`)
+1. [supabase.com](https://supabase.com) → New Project
+2. **SQL Editor** → run `supabase/schema.sql`, then `supabase/add_report_url.sql`
+3. **Storage** → New bucket `iv-signatures` → toggle **Public** ON
+4. **Project Settings → API** → copy Project URL + `service_role` key
 
-### 2 — Local `.env`
+### 2 — Local `.env` (project root — backend only)
 
 ```env
 SUPABASE_URL=https://xxxx.supabase.co
 SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiI...
-REACT_APP_API_URL=http://localhost:8000
 ```
+
+Do **not** set `REACT_APP_API_URL` locally — the CRA dev server proxies API
+calls to `localhost:8000` via the `"proxy"` field in `frontend/package.json`,
+which avoids CORS entirely. `frontend/.env` pins the dev server to port 3000.
 
 ### 3 — Run Locally
 
-**Docker Compose (recommended — matches production):**
 ```bash
-docker-compose up --build
-# Backend:  http://localhost:8000
-# Frontend: http://localhost:3000
-# API docs: http://localhost:8000/docs
-```
-
-**Manual:**
-```bash
-# Terminal 1 — backend (run from project root)
+# Terminal 1 — backend (from project root)
 pip install -r backend/requirements.txt
 uvicorn backend.main:app --reload --port 8000
 
 # Terminal 2 — frontend
 cd frontend
 npm install --legacy-peer-deps
-npm start
+npm start          # http://localhost:3000
 ```
 
-### 4 — Smoke Test Pipeline
+Docker alternative: `docker-compose up --build` → backend `:8000`,
+frontend `:3002` (3002 so it never collides with `npm start`).
+
+### 4 — Smoke Test the Pipeline
 
 ```bash
 python -c "
@@ -245,56 +264,31 @@ for f in sorted(os.listdir('test_pic')):
 "
 ```
 
-### 5 — Deploy to Render.com
+### 5 — Deploy
 
-1. Push repo to GitHub
-2. [render.com](https://render.com) → **New → Blueprint** → connect repo (reads `render.yaml`)
-3. Set env vars on `iv-sig-api` service: `SUPABASE_URL` + `SUPABASE_SERVICE_KEY`
-4. Deploy backend → copy its URL (e.g. `https://iv-sig-api.onrender.com`)
-5. Set `REACT_APP_API_URL` on `iv-sig-app` → redeploy frontend
-6. **Anti-sleep:** [UptimeRobot](https://uptimerobot.com) → HTTP monitor → `https://iv-sig-api.onrender.com/health` → every 5 min
-
-### 6 — Install as PWA
-
-| Platform | Steps |
-|---|---|
-| iPhone | Safari → Share → **Add to Home Screen** |
-| Android | Chrome → Menu → **Add to Home Screen** |
+Push to `main` → Render auto-deploys both services from `render.yaml`.
+Full instructions, env vars, and free-tier gotchas: [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
-## Adding More Board Types
+## Tests
 
-To add IGBT_BOARD_V2, IGBT_BOARD_V3, etc., run in Supabase SQL Editor:
+The image pipeline (`backend/iv_engine.py`) is covered by a pytest suite that
+uses the real sample images in `test_pic/` as fixtures — it checks shape
+classification, output structure, and DTW scoring.
 
-```sql
-INSERT INTO boards (board_name, description) VALUES
-  ('IGBT_BOARD_V2', 'Description of V2 board');
-
--- Then add its test points:
-INSERT INTO test_points (board_id, point_name, component_type, sort_order)
-SELECT board_id, 'IGBT1', 'diode', 1 FROM boards WHERE board_name = 'IGBT_BOARD_V2';
--- (repeat for each test point)
+```bash
+pip install -r backend/requirements-dev.txt
+pytest backend/tests/ -v
 ```
 
-New boards appear automatically in both the Home (Analysis) and Create Report (Collect) screens.
+These tests run automatically on every push and pull request via
+[GitHub Actions](.github/workflows/tests.yml) — no database or secrets needed.
 
 ---
 
 ## Debug Tools
 
-Open `http://localhost:3000/debug` (or production URL `/debug`) to run the
-**Pipeline Debugger** — upload any oscilloscope image to inspect every
-processing step with annotated images and charts:
-
-| Step | Shows |
-|---|---|
-| 1 Original | Raw export |
-| 2 Crop | Cyan crop box + cropped result |
-| 3 HSV Mask | Binary mask + matched pixels |
-| 4 Blob Filter | Cleaned mask (noise removed) |
-| 5 Skeleton | 1-px centerline + green overlay |
-| 6 Raw I-V | Scatter — **two-branch loop visible here** |
-| 7 Resampled | Single-valued curve for DTW (two-branch collapsed) |
-| 8 Features | shape_type, slope, r², fill_ratio table |
-| 9 Comparison | Master vs test overlay + score + diagnosis |
+`/debug` — upload any oscilloscope image to inspect every pipeline step
+(crop box, HSV mask, blob filter, skeleton, raw two-branch scatter, resampled
+curve, features, master comparison) with annotated images and charts.

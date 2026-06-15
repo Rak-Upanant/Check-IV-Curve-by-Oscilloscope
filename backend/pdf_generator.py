@@ -8,6 +8,7 @@
 # by main.py before calling this function).
 
 import os, tempfile, urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -220,11 +221,20 @@ def generate_report_pdf(session: dict) -> str:
             color=colors.HexColor("#e2e8f0"), spaceAfter=4,
         ))
 
-        # Download all images first
-        for idx, r in enumerate(results_with_images):
-            path = _fetch_image(r.get("image_url", ""))
-            if path:
-                img_paths[idx] = path
+        # Download all images concurrently. Sequential fetches were slow —
+        # a 7-point board meant 7 round-trips one after another, each up to
+        # 15 s. A thread pool overlaps them so total time ≈ the slowest one.
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            # Map each future back to its grid index so order is preserved.
+            future_to_idx = {
+                pool.submit(_fetch_image, r.get("image_url", "")): idx
+                for idx, r in enumerate(results_with_images)
+            }
+            for future in as_completed(future_to_idx):
+                idx  = future_to_idx[future]
+                path = future.result()
+                if path:
+                    img_paths[idx] = path
 
         # Layout: 2 columns, each 87mm wide (180mm content - 6mm gap)
         IMG_W  = 87 * mm
