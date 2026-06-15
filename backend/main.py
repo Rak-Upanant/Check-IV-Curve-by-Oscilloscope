@@ -117,17 +117,17 @@ async def upload_master(board_id: str, point_id: str, file: UploadFile = File(..
 
 # ─── TEST SESSIONS ───────────────────────────────────────────
 class SessionCreate(BaseModel):
-    board_id:   str
-    technician: str
-    notes:      Optional[str] = None
+    board_id: str
+    tag_no:   str            # inspection Tag NO (or technician name in analysis mode)
+    notes:    Optional[str] = None
 
 @app.post("/sessions")
 def create_session(body: SessionCreate):
     res = supabase.table("test_sessions").insert({
-        "board_id":   body.board_id,
-        "technician": body.technician,
-        "notes":      body.notes,
-        "status":     "in_progress",
+        "board_id": body.board_id,
+        "tag_no":   body.tag_no,
+        "notes":    body.notes,
+        "status":   "in_progress",
     }).execute()
     return res.data[0]
 
@@ -336,18 +336,18 @@ async def collect_image(
     Storage path structure:
       collected/{tag_no}/{board_name}/{serial_or_nosn}/{point_name}.png
 
-    tag_no    = session.technician  (Tag NO entered at inspection start)
+    tag_no    = session.tag_no      (Tag NO entered at inspection start)
     serial    = query param         (Board Serial / Unit ID per board)
     board_name, point_name resolved from DB for human-readable paths.
     """
     # ── Resolve session → tag_no + board_id ──────────────────
     sess = (supabase.table("test_sessions")
-            .select("board_id, technician")
+            .select("board_id, tag_no")
             .eq("session_id", session_id)
             .single().execute())
     if not sess.data:
         raise HTTPException(404, "Session not found")
-    tag_no   = (sess.data.get("technician") or "no-tag").strip().replace("/", "-")
+    tag_no   = (sess.data.get("tag_no") or "no-tag").strip().replace("/", "-")
     board_id = sess.data["board_id"]
 
     # ── Resolve board_name ────────────────────────────────────
@@ -420,7 +420,7 @@ async def generate_report(session_id: str, background_tasks: BackgroundTasks):
     pdf_path = generate_report_pdf(sess.data)
 
     # Semantic storage path:  reports/{tag_no}/{board_name}/report_{date}_{sid8}.pdf
-    tag_no     = (sess.data.get("technician") or "no-tag").strip().replace("/", "-")
+    tag_no     = (sess.data.get("tag_no") or "no-tag").strip().replace("/", "-")
     board_name = (sess.data.get("boards") or {}).get("board_name", "unknown")
     date_str   = datetime.utcnow().strftime("%Y%m%d")
     sid8       = session_id.replace("-", "")[:8]
@@ -440,7 +440,7 @@ async def generate_report(session_id: str, background_tasks: BackgroundTasks):
 @app.get("/boards/{board_id}/history")
 def get_history(board_id: str, limit: int = 20):
     res = (supabase.table("test_sessions")
-           .select("session_id, technician, test_date, status, test_results(status)")
+           .select("session_id, tag_no, test_date, status, test_results(status)")
            .eq("board_id", board_id)
            .order("test_date", desc=True)
            .limit(limit)
@@ -452,11 +452,11 @@ def get_history(board_id: str, limit: int = 20):
 def get_all_sessions(limit: int = 200):
     """
     Return all sessions across all boards, newest first.
-    Used by the dashboard to group inspections by Tag NO (technician field).
+    Used by the dashboard to group inspections by Tag NO.
     """
     res = (supabase.table("test_sessions")
            .select(
-               "session_id, technician, notes, test_date, status, board_id, report_url,"
+               "session_id, tag_no, notes, test_date, status, board_id, report_url,"
                "boards(board_name, description),"
                "test_results(status, similarity_score, diagnosis)"
            )

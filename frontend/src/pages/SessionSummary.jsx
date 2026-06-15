@@ -50,7 +50,7 @@ export default function SessionSummary() {
             {overall}
           </div>
           <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 4, fontFamily: "var(--mono)" }}>
-            {session?.boards?.board_name} · {session?.technician}
+            {session?.boards?.board_name} · {session?.tag_no}
           </div>
         </div>
 

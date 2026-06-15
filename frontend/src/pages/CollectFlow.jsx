@@ -224,7 +224,7 @@ function BoardSection({
               ))}
             </div>
             <div style={{ fontSize: 10, color: "var(--text3)", fontFamily: "var(--mono)", marginTop: 4 }}>
-              Storage: collected/{session.technician}/{session.boards?.board_name}/
+              Storage: collected/{session.tag_no}/{session.boards?.board_name}/
               {boardType || "—"}/{serial || "no-sn"}/…
             </div>
           </div>

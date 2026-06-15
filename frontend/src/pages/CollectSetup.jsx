@@ -1,6 +1,6 @@
 // pages/CollectSetup.jsx — Create Report setup
 // • Multi-select boards (checkboxes)
-// • Tag NO as the inspection identifier (stored as session.technician)
+// • Tag NO as the inspection identifier (stored as session.tag_no)
 // • Board Serial / Unit ID is entered per-board inside CollectFlow
 // • Creates one session per selected board → navigates to multi-board CollectFlow
 
@@ -37,7 +37,7 @@ export default function CollectSetup() {
       // Create one session per selected board in parallel
       const sessions = await Promise.all(
         [...selectedIds].map(boardId =>
-          createSession({ board_id: boardId, technician: tagNo.trim() })
+          createSession({ board_id: boardId, tag_no: tagNo.trim() })
         )
       );
       const sessionIds = sessions.map(s => s.session_id).join(",");

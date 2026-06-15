@@ -243,7 +243,7 @@ export default function Dashboard() {
     if (!sessions) return [];
     const map = new Map();
     for (const s of sessions) {
-      const tag = s.technician || "No Tag";
+      const tag = s.tag_no || "No Tag";
       if (!map.has(tag)) map.set(tag, []);
       map.get(tag).push(s);
     }

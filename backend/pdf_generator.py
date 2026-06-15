@@ -81,7 +81,7 @@ def generate_report_pdf(session: dict) -> str:
 
     # ── Session metadata ──────────────────────────────────────
     board_name = _s(session.get("boards", {}).get("board_name"))
-    technician = _s(session.get("technician"))
+    technician = _s(session.get("tag_no"))   # Tag NO (or technician name in analysis mode)
     test_date  = _s(session.get("test_date", ""))[:10]
     notes      = _s(session.get("notes"), "")
     results    = session.get("test_results") or []

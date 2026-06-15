@@ -16,7 +16,7 @@ export default function SessionSetup() {
   const board = boards?.find(b => b.board_id === boardId);
 
   const mutation = useMutation({
-    mutationFn: () => createSession({ board_id: boardId, technician: tech, notes }),
+    mutationFn: () => createSession({ board_id: boardId, tag_no: tech, notes }),
     onSuccess: (session) => {
       nav(`/test/${session.session_id}`, { state: { mode } });
     },

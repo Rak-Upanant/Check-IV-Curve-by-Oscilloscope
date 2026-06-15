@@ -18,7 +18,7 @@ export default function AnalyzeSetup() {
   });
 
   const mutation = useMutation({
-    mutationFn: () => createSession({ board_id: boardId, technician: tech.trim() }),
+    mutationFn: () => createSession({ board_id: boardId, tag_no: tech.trim() }),
     onSuccess:  (session) => nav(`/test/${session.session_id}`, { state: { mode: "analyze" } }),
     onError:    () => toast.error("Failed to create session"),
   });

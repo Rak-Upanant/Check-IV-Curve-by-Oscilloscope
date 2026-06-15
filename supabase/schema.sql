@@ -40,9 +40,10 @@ CREATE TABLE master_signatures (
 CREATE TABLE test_sessions (
   session_id  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   board_id    UUID NOT NULL REFERENCES boards(board_id) ON DELETE CASCADE,
-  technician  TEXT NOT NULL,
+  tag_no      TEXT NOT NULL,                -- inspection Tag NO (or technician name in analysis mode)
   notes       TEXT,
   status      TEXT DEFAULT 'in_progress',  -- 'in_progress' | 'completed'
+  report_url  TEXT,                         -- public URL of the generated PDF (set on report generation)
   test_date   TIMESTAMPTZ DEFAULT NOW(),
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
