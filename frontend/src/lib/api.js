@@ -22,6 +22,7 @@ export const createSession  = (body)        => api.post("/sessions", body).then(
 export const getSession     = (id)          => api.get(`/sessions/${id}`).then(r => r.data);
 export const completeSession= (id)          => api.patch(`/sessions/${id}/complete`).then(r => r.data);
 export const generateReport = (id)          => api.post(`/sessions/${id}/report`).then(r => r.data);
+export const deleteSession  = (id)          => api.delete(`/sessions/${id}`).then(r => r.data);
 
 export const uploadMaster   = (boardId, pointId, file) => {
   const fd = new FormData(); fd.append("file", file);

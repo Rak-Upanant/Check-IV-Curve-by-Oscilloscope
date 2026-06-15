@@ -13,7 +13,7 @@
 import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getAllSessions, generateReport, completeSession } from "../lib/api";
+import { getAllSessions, generateReport, completeSession, deleteSession } from "../lib/api";
 import toast from "react-hot-toast";
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -56,10 +56,29 @@ function Badge({ status }) {
 }
 
 // ── Session card for one board in an inspection ───────────────
-function SessionCard({ session }) {
+function SessionCard({ session, onDeleted }) {
   const [open,    setOpen]    = useState(false);
   const [pdfUrl,  setPdfUrl]  = useState(session.report_url ?? null);
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async (e) => {
+    e.stopPropagation();
+    // Native confirm keeps this simple — one tap to guard against misclicks.
+    const label = `${session.boards?.board_name ?? "this board"} (Tag ${session.tag_no ?? "—"})`;
+    if (!window.confirm(`Delete the inspection for ${label}?\nThis removes its results and cannot be undone.`)) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await deleteSession(session.session_id);
+      toast.success("Inspection deleted");
+      onDeleted?.();   // tell the dashboard to refetch
+    } catch {
+      toast.error("Delete failed");
+      setDeleting(false);
+    }
+  };
 
   const results  = session.test_results ?? [];
   const total    = results.length;
@@ -148,6 +167,21 @@ function SessionCard({ session }) {
           </button>
         )}
 
+        {/* Delete button */}
+        <button
+          disabled={deleting}
+          onClick={handleDelete}
+          title="Delete inspection"
+          style={{
+            background: "none", border: "1px solid var(--border2)",
+            borderRadius: 4, cursor: "pointer", padding: "3px 8px",
+            fontSize: 10, fontFamily: "var(--mono)", color: "var(--fault)",
+            flexShrink: 0,
+          }}
+        >
+          {deleting ? "…" : "🗑"}
+        </button>
+
         <span style={{
           color: "var(--text3)", fontSize: 10, transform: open ? "rotate(180deg)" : "none",
           transition: "transform 0.2s", flexShrink: 0,
@@ -219,8 +253,11 @@ function SessionCard({ session }) {
 export default function Dashboard() {
   const nav         = useNavigate();
   const queryClient = useQueryClient();
-  const [search,     setSearch]     = useState("");
-  const [refreshing, setRefreshing] = useState(false);
+  const [search,      setSearch]      = useState("");
+  const [boardFilter, setBoardFilter] = useState("");   // "" = all boards
+  const [dateFrom,    setDateFrom]    = useState("");   // YYYY-MM-DD or ""
+  const [dateTo,      setDateTo]      = useState("");   // YYYY-MM-DD or ""
+  const [refreshing,  setRefreshing]  = useState(false);
 
   const { data: sessions, isLoading, isError, refetch, dataUpdatedAt } = useQuery({
     queryKey: ["all-sessions"],
@@ -238,11 +275,28 @@ export default function Dashboard() {
     setRefreshing(false);
   };
 
-  // Group by Tag NO (technician), newest group first
+  // Unique board names for the board filter dropdown
+  const boardOptions = useMemo(() => {
+    const names = new Set((sessions ?? []).map(s => s.boards?.board_name).filter(Boolean));
+    return [...names].sort();
+  }, [sessions]);
+
+  // Group by Tag NO, newest group first, after applying board/date/search filters
   const grouped = useMemo(() => {
     if (!sessions) return [];
+
+    // Filter individual sessions first (board + date range)
+    const filtered = sessions.filter(s => {
+      if (boardFilter && s.boards?.board_name !== boardFilter) return false;
+      // test_date is an ISO string; compare its date part (first 10 chars)
+      const day = (s.test_date ?? "").slice(0, 10);
+      if (dateFrom && day && day < dateFrom) return false;
+      if (dateTo   && day && day > dateTo)   return false;
+      return true;
+    });
+
     const map = new Map();
-    for (const s of sessions) {
+    for (const s of filtered) {
       const tag = s.tag_no || "No Tag";
       if (!map.has(tag)) map.set(tag, []);
       map.get(tag).push(s);
@@ -255,10 +309,61 @@ export default function Dashboard() {
         sessions: list,
       }))
       .filter(g => !search || g.tag.toLowerCase().includes(search.toLowerCase()));
-  }, [sessions, search]);
+  }, [sessions, search, boardFilter, dateFrom, dateTo]);
 
   const totalInspections = grouped.length;
   const totalSessions    = sessions?.length ?? 0;
+  const filtersActive    = boardFilter || dateFrom || dateTo || search;
+
+  const clearFilters = () => {
+    setSearch(""); setBoardFilter(""); setDateFrom(""); setDateTo("");
+  };
+
+  // ── CSV export of the currently-filtered inspections ───────
+  const exportCsv = () => {
+    // Wrap each value in quotes and escape any embedded quotes (RFC 4180)
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+
+    const header = [
+      "Tag NO", "Board", "Date", "Status",
+      "Points", "OK", "Warning", "Fault", "Collected", "Report URL",
+    ];
+
+    const rows = [];
+    for (const group of grouped) {
+      for (const s of group.sessions) {
+        const r     = s.test_results ?? [];
+        const ok    = r.filter(x => x.status === "ok").length;
+        const warn  = r.filter(x => x.status === "warning").length;
+        const fault = r.filter(x => x.status === "fault").length;
+        const coll  = r.filter(x => x.status === "collected").length;
+        const isCollect = r.every(x => ["collected", "pending", null].includes(x.status));
+        const status = isCollect ? "collected"
+          : fault > 0 ? "fault" : warn > 0 ? "warning" : ok > 0 ? "ok" : "—";
+
+        rows.push([
+          group.tag, s.boards?.board_name ?? "", (s.test_date ?? "").slice(0, 10),
+          status, r.length, ok, warn, fault, coll, s.report_url ?? "",
+        ].map(esc).join(","));
+      }
+    }
+
+    if (rows.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+
+    const csv  = [header.map(esc).join(","), ...rows].join("\r\n");
+    // Prepend a UTF-8 BOM so Excel opens special characters correctly
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url;
+    a.download = `inspections_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${rows.length} row${rows.length !== 1 ? "s" : ""}`);
+  };
 
   return (
     <div className="page" style={{ maxWidth: 760, margin: "0 auto" }}>
@@ -308,7 +413,7 @@ export default function Dashboard() {
         </div>
 
         {/* ── Search ────────────────────────────────────────── */}
-        <div style={{ position: "relative", marginBottom: 20 }}>
+        <div style={{ position: "relative", marginBottom: 10 }}>
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -324,6 +429,73 @@ export default function Dashboard() {
             position: "absolute", left: 12, top: "50%",
             transform: "translateY(-50%)", color: "var(--text3)", fontSize: 14,
           }}>🔍</span>
+        </div>
+
+        {/* ── Filters: board + date range ───────────────────── */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+          {/* Board dropdown */}
+          <select
+            value={boardFilter}
+            onChange={e => setBoardFilter(e.target.value)}
+            style={{
+              flex: "1 1 140px", background: "var(--bg3)",
+              border: "1px solid var(--border2)", borderRadius: 6,
+              padding: "8px 10px", color: "var(--text)",
+              fontFamily: "var(--mono)", fontSize: 11, outline: "none",
+            }}
+          >
+            <option value="">All boards</option>
+            {boardOptions.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+
+          {/* Date from */}
+          <input
+            type="date" value={dateFrom}
+            onChange={e => setDateFrom(e.target.value)}
+            title="From date"
+            style={{
+              flex: "1 1 120px", background: "var(--bg3)",
+              border: "1px solid var(--border2)", borderRadius: 6,
+              padding: "8px 10px", color: "var(--text)",
+              fontFamily: "var(--mono)", fontSize: 11, outline: "none",
+            }}
+          />
+
+          {/* Date to */}
+          <input
+            type="date" value={dateTo}
+            onChange={e => setDateTo(e.target.value)}
+            title="To date"
+            style={{
+              flex: "1 1 120px", background: "var(--bg3)",
+              border: "1px solid var(--border2)", borderRadius: 6,
+              padding: "8px 10px", color: "var(--text)",
+              fontFamily: "var(--mono)", fontSize: 11, outline: "none",
+            }}
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
+          <button
+            className="btn btn-ghost"
+            style={{ width: "auto", padding: "5px 12px", fontSize: 10,
+              borderColor: "var(--accent)", color: "var(--accent)" }}
+            disabled={grouped.length === 0}
+            onClick={exportCsv}
+          >
+            ⬇ Export CSV
+          </button>
+          {filtersActive && (
+            <button
+              className="btn btn-ghost"
+              style={{ width: "auto", padding: "5px 12px", fontSize: 10 }}
+              onClick={clearFilters}
+            >
+              ✕ Clear filters
+            </button>
+          )}
         </div>
 
         {/* ── Loading / error ───────────────────────────────── */}
@@ -370,7 +542,9 @@ export default function Dashboard() {
             </div>
 
             {/* Session cards */}
-            {list.map(s => <SessionCard key={s.session_id} session={s} />)}
+            {list.map(s => (
+              <SessionCard key={s.session_id} session={s} onDeleted={refetch} />
+            ))}
           </div>
         ))}
 

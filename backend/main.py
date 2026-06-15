@@ -153,6 +153,19 @@ def complete_session(session_id: str):
            .execute())
     return res.data[0]
 
+@app.delete("/sessions/{session_id}")
+def delete_session(session_id: str):
+    """
+    Delete an inspection session. Its test_results rows are removed
+    automatically by the ON DELETE CASCADE foreign key.
+
+    Note: this does not delete the image/PDF files in Supabase Storage —
+    those become orphaned but are harmless (and storage is cheap). A storage
+    sweep could be added later if needed.
+    """
+    supabase.table("test_sessions").delete().eq("session_id", session_id).execute()
+    return {"deleted": session_id}
+
 # ─── ANALYZE IMAGE ───────────────────────────────────────────
 @app.post("/sessions/{session_id}/analyze")
 async def analyze_image(session_id: str, point_id: str, file: UploadFile = File(...)):
